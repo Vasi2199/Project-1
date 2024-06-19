@@ -1,0 +1,148 @@
+#include "main.h"
+
+#define TRIG_PIN GPIO_PIN_9
+#define TRIG_PORT GPIOA
+#define ECHO_PIN GPIO_PIN_8
+#define ECHO_PORT GPIOA
+#define SERVO_PIN TIM_CHANNEL_1
+#define SERVO_TIM &htim2
+
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim3;
+
+uint32_t echo_duration;
+uint32_t distance;
+
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM3_Init(void);
+void delay_us(uint16_t us);
+void set_servo_angle(uint8_t angle);
+uint32_t read_ultrasonic_distance(void);
+
+int main(void) {
+    HAL_Init();
+    SystemClock_Config();
+    MX_GPIO_Init();
+    MX_TIM2_Init();
+    MX_TIM3_Init();
+
+    HAL_TIM_PWM_Start(&htim2, SERVO_PIN);
+
+    while (1) {
+        distance = read_ultrasonic_distance();
+        if (distance < 20) {
+            set_servo_angle(90); // Example: turn servo to 90 degrees
+        } else {
+            set_servo_angle(0); // Example: turn servo to 0 degrees
+        }
+        HAL_Delay(500);
+    }
+}
+
+void SystemClock_Config(void) {
+    // System clock configuration code here
+}
+
+static void MX_GPIO_Init(void) {
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    GPIO_InitStruct.Pin = TRIG_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(TRIG_PORT, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = ECHO_PIN;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(ECHO_PORT, &GPIO_InitStruct);
+}
+
+static void MX_TIM2_Init(void) {
+    TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+    TIM_MasterConfigTypeDef sMasterConfig = {0};
+    TIM_OC_InitTypeDef sConfigOC = {0};
+
+    htim2.Instance = TIM2;
+    htim2.Init.Prescaler = 79;
+    htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim2.Init.Period = 19999;
+    htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    if (HAL_TIM_Base_Init(&htim2) != HAL_OK) {
+        Error_Handler();
+    }
+    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+    if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+    }
+    if (HAL_TIM_PWM_Init(&htim2) != HAL_OK) {
+        Error_Handler();
+    }
+    sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+    sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+    if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK) {
+        Error_Handler();
+    }
+    sConfigOC.OCMode = TIM_OCMODE_PWM1;
+    sConfigOC.Pulse = 1500;  // Initial position (90 degrees)
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+    if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK) {
+        Error_Handler();
+    }
+    HAL_TIM_MspPostInit(&htim2);
+}
+
+static void MX_TIM3_Init(void) {
+    TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+
+    htim3.Instance = TIM3;
+    htim3.Init.Prescaler = 79;
+    htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
+    htim3.Init.Period = 0xffff;
+    htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+    if (HAL_TIM_Base_Init(&htim3) != HAL_OK) {
+        Error_Handler();
+    }
+    sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+    if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK) {
+        Error_Handler();
+    }
+}
+
+void delay_us(uint16_t us) {
+    __HAL_TIM_SET_COUNTER(&htim3, 0);
+    while (__HAL_TIM_GET_COUNTER(&htim3) < us);
+}
+
+uint32_t read_ultrasonic_distance(void) {
+    HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
+    delay_us(2);
+    HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
+    delay_us(10);
+    HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
+
+    while (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) == GPIO_PIN_RESET);
+    uint32_t start = __HAL_TIM_GET_COUNTER(&htim3);
+
+    while (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) == GPIO_PIN_SET);
+    uint32_t stop = __HAL_TIM_GET_COUNTER(&htim3);
+
+    echo_duration = stop - start;
+    return (echo_duration * 0.034 / 2);
+}
+
+void set_servo_angle(uint8_t angle) {
+    uint32_t pulse = (angle * 10) + 1500;
+    __HAL_TIM_SET_COMPARE(SERVO_TIM, SERVO_PIN, pulse);
+}
+
+void Error_Handler(void) {
+    while (1) {
+        // Stay in loop if there's an error
+    }
+}
